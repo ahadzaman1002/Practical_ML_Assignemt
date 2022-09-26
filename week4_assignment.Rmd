@@ -1,0 +1,158 @@
+---
+title: "Practical Machine Learning-Week4 Assignment"
+author: "Ahad Zaman Khan"
+date: "2022-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+## Loading and processing The Data
+
+I downloaded the data and reading it from local drive. 
+```{r}
+
+library(tidyverse)
+list.files()
+
+
+pml_train <- read_csv("pml-training.csv")
+
+```
+
+First column of the data is row numbers. Lets remove it from the data. I also check how the class variable is distributed. 
+
+```{r}
+pml_train <- pml_train[ , -1]
+
+names(pml_train)
+
+length(unique(pml_train$classe))
+unique(pml_train$classe)
+
+# find distribution of class variable-
+pml_train %>% group_by(classe) %>% 
+  summarise( no_obs = n(), prcnt = 100* n()/nrow(.)  )
+```
+
+Lets check for missing values in the data-
+
+```{r}
+# function to check a summary for "NA"s
+na_count <-
+  function(z) {
+    num_obs = nrow(z)
+    y =  map_df(z,  ~ sum(is.na(.x)))
+    y = pivot_longer(y,
+                     everything(),
+                     names_to = "variable",
+                     values_to = "num_na") %>%
+      filter(num_na > 0)
+    y$prcnt = y$num_na *100 /num_obs 
+    
+    return(y)
+  }
+
+na_count(pml_train) %>% arrange(-prcnt)
+
+```
+
+100 variables out of 159 variable has 97.93% to 97.97% records are missing "NA".I am omitting this variables and creating a new data named pml_train2. lets find out which variables does not have missing values:
+
+```{r}
+pml_train2 <- pml_train %>%
+  select( -na_count(pml_train)$variable   )
+```
+
+
+lets find the variables that are not numeric: 
+
+```{r}
+pml_train2 %>% select_if(~!is.numeric(.)) %>% names()
+```
+
+4 columns are not numerical. "classe" is dependent / predict variable. Ignoring other 3 variables. 
+
+```{r}
+pml_train2 <- pml_train2 %>% 
+  select( - c("user_name",  "cvtd_timestamp", "new_window") )
+```
+
+## Partitioning the data
+
+```{r}
+library(caret)
+
+train_sample <- createDataPartition(y = pml_train2$classe, p = 0.7, list = FALSE)
+
+training <- pml_train2[train_sample,]
+testing <- pml_train2[-train_sample,]
+```
+
+
+## Prediction models: 
+
+### DECISION TREE
+```{r}
+DT_model <- train(classe~.,
+                  data = training, method = "rpart")
+
+DT_prediction <- predict(DT_model, testing)
+
+confusionMatrix(DT_prediction, as.factor(testing$classe))
+```
+
+We can see prediction accuracy is only 52.05%.
+
+```{r}
+rpart.plot:: rpart.plot(DT_model$finalModel, 
+                        roundint = FALSE)
+```
+
+
+### RANDOM FOREST MDOEL
+```{r}
+rm_mdl <- train(classe~., data = training, method = "rf", ntree = 250)
+
+rf_predict <- predict(rm_mdl, testing)
+confusionMatrix(rf_predict, factor(testing$classe))
+```
+
+### Gradient boosting model:
+```{r}
+gbm_model <- train(classe~., data = training, method = "gbm", verbose = FALSE )
+
+gbm_model$finalModel
+
+gbm_predict <- predict(gbm_model, testing)
+
+confusionMatrix(gbm_predict, factor(testing$classe))
+```
+
+I can see both Random forest and Gradient boosting model are highely accurate. However, Random forest is better performing and I will use this as my prediction model.
+
+## LOADING TESTING DATA and cleaning in same manner as test data
+```{r}
+pml_test <- read_csv("pml-testing.csv")
+
+pml_test <- pml_test[ ,-1]
+
+pml_test <- pml_test %>% 
+  select( -na_count(pml_train)$variable   )
+
+pml_test <- pml_test %>% 
+  select( - c("user_name",  "cvtd_timestamp", "new_window") )
+```
+
+## Final Prediction:
+
+```{r}
+rf_final_predition <- predict(rm_mdl, pml_test)
+
+rf_final_predition
+```
+
